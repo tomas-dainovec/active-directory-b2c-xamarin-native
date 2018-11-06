@@ -18,36 +18,57 @@ namespace UserDetailsClient.Core
 
         async void OnSignInSignOut(object sender, EventArgs e)
         {
+            var signedIn = false;
+
             IEnumerable<IAccount> accounts = await App.PCA.GetAccountsAsync();
-            try
+
+            // Doing this in the loop to handle cancelation of sign-up or password reset
+            while (!signedIn)
             {
-                if (btnSignInSignOut.Text == "Sign in")
+                try
                 {
-                    AuthenticationResult ar = await App.PCA.AcquireTokenAsync(App.Scopes, GetAccountByPolicy(accounts, App.PolicySignUpSignIn), App.UiParent);
-                    UpdateUserInfo(ar);
-                    UpdateSignInState(true);
-                }
-                else
-                {
-                    while (accounts.Any())
+                    if (btnSignInSignOut.Text == "Sign in")
                     {
-                        await App.PCA.RemoveAsync(accounts.FirstOrDefault());
-                        accounts = await App.PCA.GetAccountsAsync();
+                        AuthenticationResult ar = await App.PCA.AcquireTokenAsync(App.Scopes, GetAccountByPolicy(accounts, App.PolicySignUpSignIn), App.UiParent);
+                        UpdateUserInfo(ar);
+                        signedIn = true;
+                        UpdateSignInState(true);
                     }
-                    UpdateSignInState(false);
+                    else
+                    {
+                        while (accounts.Any())
+                        {
+                            await App.PCA.RemoveAsync(accounts.FirstOrDefault());
+                            accounts = await App.PCA.GetAccountsAsync();
+                        }
+                        UpdateSignInState(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Checking the exception message 
+                    // should ONLY be done for B2C
+                    // reset and not any other error.
+                    if (ex.Message.Contains("AADB2C90118"))
+                        OnPasswordReset();
+                    // Alert if any exception excludig user cancelling sign-in dialog
+                    //else if (((ex as MsalException)?.ErrorCode != "authentication_canceled"))
+                    //    await DisplayAlert($"Exception:", ex.ToString(), "Dismiss");
+                    else if (((ex as MsalException)?.ErrorCode == "authentication_canceled"))
+                    {
+                        await DisplayAlert($"Authentication Canceled", "Authentication Canceled", "Dismiss");
+                    }
+
+                    break; // Break if cancelled will re-open as OnAppearing will be called
                 }
             }
-            catch (Exception ex)
-            {
-                // Checking the exception message 
-                // should ONLY be done for B2C
-                // reset and not any other error.
-                if (ex.Message.Contains("AADB2C90118"))
-                    OnPasswordReset();
-                // Alert if any exception excludig user cancelling sign-in dialog
-                else if (((ex as MsalException)?.ErrorCode != "authentication_canceled"))
-                    await DisplayAlert($"Exception:", ex.ToString(), "Dismiss");
-            }
+        }
+
+        protected override void OnAppearing()
+        {
+            base.OnAppearing();
+
+            OnSignInSignOut(null, null);
         }
 
         private IAccount GetAccountByPolicy(IEnumerable<IAccount> accounts, string policy)
